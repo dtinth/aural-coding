@@ -4,18 +4,22 @@ midi = require 'midi'
 output = new midi.output()
 output.openVirtualPort('aural-coding-midi')
 
+_ = require 'lodash'
+song = require './song'
+
 module.exports =
 class AuralCoding
   constructor: ->
     @firstKey = 0x15
     @lastKey = 0x6C
+    @i = 0
     @sources = { }
 
     @majorScaleNotes = [@firstKey...@lastKey].filter (key, index) =>
       ((index + 4) % 12) in [0,2,4,5,7,9,11] # C Major Scale. (I think?)
 
-    atom.views.getView(atom.workspace).addEventListener 'keydown', (e) => @noteOn(e)
-    atom.views.getView(atom.workspace).addEventListener 'keyup', (e) => @noteOff(e)
+    atom.views.getView(atom.workspace).addEventListener 'keydown', ((e) => @noteOn(e)), true
+    atom.views.getView(atom.workspace).addEventListener 'keyup', ((e) => @noteOff(e)), true
 
   noteForEvent: (key, modifiers) ->
     return unless key
@@ -45,19 +49,30 @@ class AuralCoding
       return { note: index, velocity: velocity ? 0.2, channel: 10 }
 
   noteOn: (event) ->
-    console.log event
+    return if event.metaKey
     {key, modifiers} = @keystrokeForKeyboardEvent(event)
     return unless key
-    {note, velocity, channel} = @noteForEvent(key, modifiers)
-    return unless note
-    @midi([0x90 + channel - 1, note, Math.floor(Math.max(0, Math.min(1, velocity)) * 127)])
-    @sources[event.which] = =>
-      @midi([0x90 + channel - 1, note, 0])
+    return if @sources[event.which]
+    @current() if @current
+    note = song.events[@i % song.events.length]
+    @current = @go(note)
+    @sources[event.which] = true
+
+  go: (event) ->
+    @midi([0x90, note.note, note.velocity]) for note in event.on
+    =>
+      @midi([0x90, note.note, 0]) for note in event.off
 
   noteOff: (event) ->
-    if source = @sources[event.which]
-      @sources[event.which] = null
-      source()
+    delete @sources[event.which]
+    if @current and Object.keys(@sources).length is 0
+      @current()
+      delete @current
+
+  note: (channel, note, velocity) ->
+    @midi([0x90 + channel - 1, note, velocity])
+    =>
+      @midi([0x90 + channel - 1, note, 0])
 
   midi: (message) ->
     # console.log(message)
