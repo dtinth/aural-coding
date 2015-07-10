@@ -1,10 +1,11 @@
 {
-  "name": "aural-coding",
+  "name": "aural-coding-midi",
   "description": "Make sweet music while typing wonderful code!",
   "version": "1.0.0",
   "main": "./lib/main",
-  "repository": "https://github.com/probablycorey/aural-coding.git",
+  "repository": "https://github.com/dtinth/aural-coding.git",
   "dependencies": {
-    "emissary": "^1.2.0"
+    "emissary": "^1.2.0",
+    "midi": "^0.9.3"
   }
 }

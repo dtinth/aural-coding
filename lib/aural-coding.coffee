@@ -1,50 +1,30 @@
-Base64Binary = require '../vendor/base64binary'
-piano = require '../vendor/acoustic_grand_piano-ogg'
-drum = require '../vendor/synth_drum-ogg'
+
+midi = require 'midi'
+
+output = new midi.output()
+output.openVirtualPort('aural-coding-midi')
 
 module.exports =
 class AuralCoding
   constructor: ->
     @firstKey = 0x15
     @lastKey = 0x6C
-    @noteNames = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
-    @context = new AudioContext()
-    @keys = {}
-    @drums = {}
-    @sources = {}
-    @keyForNoteName = {}
-    @noteForKey = {}
-    @allNoteNames = []
-
-    for key in [@firstKey...@lastKey]
-      octave = Math.floor((key - 12) / 12)
-      noteName = @noteNames[key % 12] + octave
-      @allNoteNames.push noteName
-      @keyForNoteName[noteName] = key
-      @noteForKey[key] = noteName
+    @sources = { }
 
     @majorScaleNotes = [@firstKey...@lastKey].filter (key, index) =>
       ((index + 4) % 12) in [0,2,4,5,7,9,11] # C Major Scale. (I think?)
 
     atom.views.getView(atom.workspace).addEventListener 'keydown', (e) => @noteOn(e)
-    atom.views.getView(atom.workspace).addEventListener 'onkeyup', (e) => @noteOff(e)
+    atom.views.getView(atom.workspace).addEventListener 'keyup', (e) => @noteOff(e)
 
-    for noteName in @allNoteNames
-      do (noteName) =>
-        soundData = Base64Binary.decodeArrayBuffer(piano[noteName].split(",")[1])
-        @context.decodeAudioData soundData, (soundBuffer) => @keys[@keyForNoteName[noteName]] = soundBuffer
-
-        soundData = Base64Binary.decodeArrayBuffer(drum[noteName].split(",")[1])
-        @context.decodeAudioData soundData, (soundBuffer) => @drums[@keyForNoteName[noteName]] = soundBuffer
-
-  bufferForEvent: (key, modifiers) ->
+  noteForEvent: (key, modifiers) ->
     return unless key
 
     if /^[a-z]$/i.test key
       keyCode = key.toUpperCase().charCodeAt(0)
       index = 24 + (keyCode - 'A'.charCodeAt(0)) % 12
       index += 12 if /[A-Z]/.test key
-      return {buffer: @keys[@majorScaleNotes[index]]}
+      return { note: @majorScaleNotes[index], channel: 1, velocity: 0.75 }
     else
       [index, velocity] = switch key
         when 'backspace' then [50, 1]
@@ -62,32 +42,26 @@ class AuralCoding
         when '!' then [54, 2]
         else [45]
 
-      return {buffer: @drums[index], velocity: velocity ? 0.2}
+      return { note: index, velocity: velocity ? 0.2, channel: 10 }
 
   noteOn: (event) ->
     console.log event
     {key, modifiers} = @keystrokeForKeyboardEvent(event)
     return unless key
-    {buffer, velocity} = @bufferForEvent(key, modifiers)
-    return unless buffer
-    return if @sources[event.which]?.playbackState == 2
-
-    gainNode = @context.createGain()
-    gainNode.connect(@context.destination)
-    gainNode.gain.value = velocity;
-
-    source = @context.createBufferSource()
-    @sources[event.which] = source
-    source.buffer = buffer
-    source.connect(gainNode);
-    source.start(0)
+    {note, velocity, channel} = @noteForEvent(key, modifiers)
+    return unless note
+    @midi([0x90 + channel - 1, note, Math.floor(Math.max(0, Math.min(1, velocity)) * 127)])
+    @sources[event.which] = =>
+      @midi([0x90 + channel - 1, note, 0])
 
   noteOff: (event) ->
     if source = @sources[event.which]
       @sources[event.which] = null
-      source.gain.linearRampToValueAtTime(1, @context.currentTime)
-      source.gain.linearRampToValueAtTime(0, @context.currentTime + 0.5)
-      source.stop(@context.currentTime + 0.6)
+      source()
+
+  midi: (message) ->
+    # console.log(message)
+    output.sendMessage(message)
 
   keystrokeForKeyboardEvent: (event) ->
     keyIdentifier = event.keyIdentifier
